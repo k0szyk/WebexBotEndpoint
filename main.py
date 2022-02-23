@@ -11,8 +11,9 @@ password = "koszyK)0"
 refreshToken = "nVaWXXFFUGeUDM4dgMT2HvMWFOHLZGnJnmJSrcWSXHzeuBgpgkgBBHUFwzELCWYZKK5yVhwCPonjBaCHupLR2w"
 ##
 url = "https://dev70378.service-now.com"
-incidentNumber = "INC0010050"
 additionalComment = "User X added a comment via Webex application: Yet another comment!!!"
+
+webexUrl = "https://webexapis.com"
 
 app = flask.Flask(__name__)
 
@@ -63,20 +64,41 @@ def putWorkComment(accessToken, incidentSysId, url, additionalComment):
     return response
 
 
+def getWebexItemDetails(botToken, messageId, webexUrl, itemSpecificUrl):
+    botToken = "Bearer " + botToken
+    headers = {
+        'Authorization': botToken,
+        'Accepts': 'application/json'}
+    url = webexUrl + itemSpecificUrl + messageId
+    response = requests.get(url, headers=headers, verify=False)
+    return response
+
 #responseRefreshToken = getRefreshToken(clientId, clientSecret, username, password, url)
 #responseRefreshToken = json.loads(responseRefreshToken.text)
 #print(responseRefreshToken)
 
-@app.route('/api/v1/resources/add_comment', methods=['PUT'])
-def addComment():
-    # response = getRefreshToken(clientId, clientSecret, username, password, url)
+@app.route('/api/v1/resources/webhook', methods=['POST'])
+def webhook():
+    
+    webexUrl = "https://webexapis.com/"
+    getMessageDetailsUrl = "v1/messages/"
+    getRoomDetailsUrl = "v1/rooms/"
+    botToken = "OTI5NGY2OTUtNzhhYS00ZDVmLTg0ODktZDAxMjQ3NDM4ZTFiYmEyMGI4MTAtNGQx_PF84_3889a4c9-3174-445a-b3b8-b0528d045fab"
+
     req = request.json
-    print(req)
+    responseMessage = getWebexItemDetails(botToken, req["data"]["id"], webexUrl, getMessageDetailsUrl)
+    responseMessage = json.loads(responseMessage.text)
+    comment = "User " + responseMessage["personEmail"] + " has added a comment: " + responseMessage["text"].split("Bot")[1]
+    roomId = responseMessage["roomId"]
+    response = getWebexItemDetails(botToken, roomId, webexUrl, getRoomDetailsUrl)
+    response = json.loads(response.text)
+    incidentNumber = response["title"].split(":")[0]
+
     responseAccessToken = getAccessToken(clientId, clientSecret, refreshToken, url)
     responseAccessToken = json.loads(responseAccessToken.text)
     responseIncidentSysId = getIncidentSysId(responseAccessToken["access_token"], incidentNumber, url)
     responseIncidentSysId = json.loads(responseIncidentSysId.text)
-    responseWorkComment = putWorkComment(responseAccessToken["access_token"], responseIncidentSysId["result"][0]["sys_id"], url, req["comments"])
+    responseWorkComment = putWorkComment(responseAccessToken["access_token"], responseIncidentSysId["result"][0]["sys_id"], url, comment)
     return responseWorkComment.text
 
-app.run(host='0.0.0.0', port=5002)
+app.run(host='0.0.0.0', port=5002, ssl_context='adhoc')
