@@ -47,7 +47,7 @@ def getIncidentSysId(accessToken, incidentNumber, url):
     accessToken = "Bearer " + accessToken
     headers = {
         'Authorization': accessToken}
-    url = url + "/api/now/table/incident?sysparm_limit=1&number=INC0010050"
+    url = url + "/api/now/table/incident?sysparm_limit=1&number=" + incidentNumber
     response = requests.get(url, headers=headers, verify=False)
     return response
 
@@ -93,12 +93,17 @@ def webhook():
     response = getWebexItemDetails(botToken, roomId, webexUrl, getRoomDetailsUrl)
     response = json.loads(response.text)
     incidentNumber = response["title"].split(":")[0]
-
     responseAccessToken = getAccessToken(clientId, clientSecret, refreshToken, url)
-    responseAccessToken = json.loads(responseAccessToken.text)
-    responseIncidentSysId = getIncidentSysId(responseAccessToken["access_token"], incidentNumber, url)
+    if responseAccessToken.status_code == 200:
+        responseAccessToken = json.loads(responseAccessToken.text)
+        accessToken = responseAccessToken["access_token"]
+    elif responseAccessToken.status_code == 401:
+        responseRefreshToken = getRefreshToken(clientId, clientSecret, username, password, url)
+        responseRefreshToken = json.loads(responseRefreshToken.text)
+        accessToken = responseRefreshToken["access_token"]
+    responseIncidentSysId = getIncidentSysId(accessToken, incidentNumber, url)
     responseIncidentSysId = json.loads(responseIncidentSysId.text)
-    responseWorkComment = putWorkComment(responseAccessToken["access_token"], responseIncidentSysId["result"][0]["sys_id"], url, comment)
+    responseWorkComment = putWorkComment(accessToken, responseIncidentSysId["result"][0]["sys_id"], url, comment)
     return responseWorkComment.text
 
 app.run(host='0.0.0.0', port=5002, ssl_context='adhoc')
