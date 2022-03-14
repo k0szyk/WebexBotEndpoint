@@ -1,5 +1,11 @@
-def createWelcomeCard():
+import base64
 
+def createWelcomeCard() -> str:
+    """
+    Contains a payload required to create a Webex card - createWelcomeCard.
+    
+    :return: String with a payload required to create a Webex card - createWelcomeCard.
+    """
     payload = "[{\
         \"contentType\": \"application/vnd.microsoft.card.adaptive\",\
         \"content\": \
@@ -40,7 +46,11 @@ def createWelcomeCard():
                 \"wrap\": true},\
                 {\"type\": \"TextBlock\",\
                 \"text\": \"* If you have some ideas on how to improve the bot, please select ```Feedback```.\",\
-                \"wrap\": true}],\
+                \"wrap\": true},\
+                {\"type\": \"TextBlock\",\
+                \"text\": \"Questions? Check our [FAQ page](https://aoneu.sharepoint.com/sites/ServiceNowBot/SitePages/ServiceNow-bot-FAQ.aspx) or join our [Webex space](webexteams://im?space=2aea4820-a044-11ec-8a62-89330e4a0a9f).\",\
+                \"weight\": \"Lighter\",\
+                \"color\": \"Light\"}],\
             \"actions\":\
                 [{\"type\": \"Action.Submit\",\
                 \"title\": \"Create an Incident\",\
@@ -53,12 +63,17 @@ def createWelcomeCard():
                 {\"type\": \"Action.Submit\",\
                 \"title\": \"Feedback\",\
                 \"data\":{\
-                    \"flow\": \"feedback\"}}]}}]"
+                    \"flow\": \"feedback\"}}\
+                    ]}}]"
     return payload
 
 
-def createIncidentCard():
-
+def createIncidentCard() -> str:
+    """
+    Contains a payload required to create a Webex card - createIncidentCard.
+    
+    :return: String with a payload required to create a Webex card - createIncidentCard.
+    """
     payload = "[{\
         \"contentType\": \"application/vnd.microsoft.card.adaptive\",\
         \"content\": \
@@ -126,12 +141,22 @@ def createIncidentCard():
                     \"flow\": \"createIncident\"}}]}}]"
     return payload
 
-def previousIncidentsCard(incidentList, url):
+def previousIncidentsCard(incidentList: list, url: str) -> str:
+    """
+    Contains a payload required to create a Webex card - createIncidentCard.
+    
+    :param incidentList: List with previously opened incidents.
+    :param url: String representing the ServiceNow instance URL.
+    :return: String with a payload required to create a Webex card - createIncidentCard.
+    """
     incidentString = ""
     i = 0
     for incident in incidentList:
         i = i + 1
-        incidentString = incidentString + "{{\"type\": \"TextBlock\",\"text\": \"[{}]({}/sp?id=ticket&table=incident&view=sp&sys_id={}): [{}] - {}\",\"wrap\": true}}".format(incident["number"], url, incident["sysId"], incident["state"], incident["shortDescription"])
+        if incident["state"] != "Closed" and incident["spaceId"]:
+            incidentString = incidentString + "{{\"type\": \"TextBlock\",\"text\": \"[{}]({}/sp?id=ticket&table=incident&view=sp&sys_id={}): [{}] - {} - [go to Webex space](webexteams://im?space={})\",\"wrap\": true}}".format(incident["number"], url, incident["sysId"], incident["state"], incident["shortDescription"], base64.b64decode(incident["spaceId"]).decode('utf-8').split("/")[-1])
+        else:
+            incidentString = incidentString + "{{\"type\": \"TextBlock\",\"text\": \"[{}]({}/sp?id=ticket&table=incident&view=sp&sys_id={}): [{}] - {}\",\"wrap\": true}}".format(incident["number"], url, incident["sysId"], incident["state"], incident["shortDescription"])
         if len(incidentList) > i:
             incidentString = incidentString + ","
     payload = "[{\
@@ -175,8 +200,12 @@ def previousIncidentsCard(incidentList, url):
     return payload
 
 
-def createFeedbackCard():
-
+def createFeedbackCard() -> str:
+    """
+    Contains a payload required to create a Webex card - createFeedbackCard.
+    
+    :return: String with a payload required to create a Webex card - createFeedbackCard.
+    """
     payload = "[{\
         \"contentType\": \"application/vnd.microsoft.card.adaptive\",\
         \"content\": \
