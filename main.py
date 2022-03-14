@@ -1,11 +1,12 @@
-import requests
+from codecs import strict_errors
 import json
-import urllib.parse
 import flask
 import logging
 import time
 from flask import request
 from cards import createIncidentCard, createWelcomeCard, previousIncidentsCard, createFeedbackCard
+from serviceNowLibrary import getRefreshToken, getAccessToken, getIncidentSysId, getUserSysId, createIncident, updateIncident, getPreviousIncidents, putWorkComment
+from webexLibrary import getWebexItemDetails, postWebexMessage, deleteWebexMessage
 from domains import domains
 
 logging.basicConfig(level=logging.DEBUG,format='%(asctime)s %(levelname)s %(message)s', filename='./WebexBotEndpoint.log', filemode='a')
@@ -13,11 +14,9 @@ clientId = "ddbddd39a4b10110bebfa2dcd57241bc"
 clientSecret = "MiyNOb<iKU"
 username = "webex.bot"
 password = "koszyK)0"
-## temp value ##
 refreshToken = "nVaWXXFFUGeUDM4dgMT2HvMWFOHLZGnJnmJSrcWSXHzeuBgpgkgBBHUFwzELCWYZKK5yVhwCPonjBaCHupLR2w"
-##
 url = "https://dev70378.service-now.com"
-additionalComment = "User X added a comment via Webex application: Yet another comment!!!"
+#additionalComment = "User X added a comment via Webex application: Yet another comment!!!"
 
 webexUrl = "https://webexapis.com/"
 getMessageDetailsUrl = "v1/messages/"
@@ -45,232 +44,99 @@ incidentStates = {"1": "New", "2": "In Progress", "3": "On Hold", "4": "Canceled
 
 app = flask.Flask(__name__)
 
-def getRefreshToken(clientId, clientSecret, username, password, url):
 
-    data = {
-                'grant_type': 'password',
-                'client_id': clientId,
-                'client_secret': clientSecret,
-                'username': username,
-                'password': password}
-    url = url + "/oauth_token.do"
-    response = requests.post(url, data=data, verify=False)
-    logging.debug("[getRefreshToken]### RETRIEVED succesfully refresh token and access token.")
-    return response
-
-
-def getAccessToken(clientId, clientSecret, refreshToken, url):
-
-    data = {
-                'grant_type': 'refresh_token',
-                'client_id': clientId,
-                'client_secret': clientSecret,
-                'refresh_token': refreshToken}
-    url = url + "/oauth_token.do"
-    responseAccessToken = requests.post(url, data=data, verify=False)
-    if responseAccessToken.status_code == 200:
-        responseAccessToken = json.loads(responseAccessToken.text)
-        logging.debug("[getAccessToken]### RETRIEVED succesfully access token.")
-    elif responseAccessToken.status_code == 401:
-        responseRefreshToken = getRefreshToken(clientId, clientSecret, username, password, url)
-        responseRefreshToken = json.loads(responseRefreshToken.text)
-        logging.debug("[getAccessToken]### RETRIEVED succesfully access token through refresh token.")
-    return responseAccessToken
-
-
-def getIncidentSysId(accessToken, incidentNumber, url):
-
-    accessToken = "Bearer " + accessToken
-    headers = {'Authorization': accessToken}
-    url = url + "/api/now/table/incident?sysparm_limit=1&number=" + incidentNumber
-    response = requests.get(url, headers=headers, verify=False)
-    return response
-
-
-def getUserSysId(email, url):
-    responseAccessToken = getAccessToken(clientId, clientSecret, refreshToken, url)
-    accessToken = responseAccessToken["access_token"]
-    accessToken = "Bearer " + accessToken
-    headers = {'Authorization': accessToken}
-    query = {"sysparm_query": "email=" + email, "sysparm_display_value": "sys_id", "sysparm_limit": 1}
-    url = url + "/api/now/table/sys_user?" + urllib.parse.urlencode(query)
-    response = requests.get(url, headers=headers, verify=False)
-    return response
-
-def createIncident(callerId, url, shortDescription, fullDescription="", urgency=3, impact=3, checkbox=True):
-    responseAccessToken = getAccessToken(clientId, clientSecret, refreshToken, url)
-    accessToken = responseAccessToken["access_token"]
-    accessToken = "Bearer " + accessToken
-    headers = {'Authorization': accessToken,
-               'Content-Type': 'application/json',
-               'Accept': 'application/json'}
-    data = {'short_description': shortDescription,
-            'description': fullDescription,
-            'urgency': urgency,
-            'impact': impact,
-            'caller_id': callerId,
-            'x_773797_webex_dem_wbxcheckbox': checkbox}
-    data = json.dumps(data)
-    url = url + "/api/now/table/incident"
-    response = requests.post(url, headers=headers, data=data, verify=False)
-    logging.debug("[createIncident]### CREATED an incident in ServiceNow: \"{}\" with sys_id: {}.".format(json.loads(response.text)["result"]["number"], json.loads(response.text)["result"]["sys_id"]))
-    return response
-
-
-def updateIncident(url, sysId, updatedAttributes):
-    responseAccessToken = getAccessToken(clientId, clientSecret, refreshToken, url)
-    accessToken = responseAccessToken["access_token"]
-    accessToken = "Bearer " + accessToken
-    headers = {'Authorization': accessToken,
-               'Content-Type': 'application/json',
-               'Accept': 'application/json'}
-    data = updatedAttributes
-    data = json.dumps(data)
-    url = url + "/api/now/table/incident/" + sysId
-    response = requests.patch(url, headers=headers, data=data, verify=False)
-    logging.debug("[createIncident]### UPDATED an incident in ServiceNow: \"{}\" with sys_id: {}.".format(json.loads(response.text)["result"]["number"], json.loads(response.text)["result"]["sys_id"]))
-    return response
-
-
-def getPreviousIncidents(url, userSysId, count):
-    responseAccessToken = getAccessToken(clientId, clientSecret, refreshToken, url)
-    accessToken = responseAccessToken["access_token"]
-    accessToken = "Bearer " + accessToken
-    headers = {'Authorization': accessToken,
-               'Content-Type': 'application/json',
-               'Accept': 'application/json'}
-    query = {"sysparm_query": "caller_id=" + userSysId + "^ORDERBYDESCsys_created_on",
-             "sysparm_display_value": "sys_created_on,caller_id,short_description,sys_id,x_773797_webex_dem_spaceid,state,number", 
-             "sysparm_limit": count}
-    url = url + "/api/now/table/incident?" + urllib.parse.urlencode(query)
-    response = requests.get(url, headers=headers, verify=False)
-    return response
-
-
-def putWorkComment(accessToken, incidentSysId, url, additionalComment):
-
-    accessToken = "Bearer " + accessToken
-    headers = {
-        'Authorization': accessToken,
-        'Content-Type': 'application/json'}
-    data = "{\"comments\" :\"" + additionalComment + "\"}"
-    url = url + "/api/now/table/incident/" + incidentSysId
-    response = requests.put(url, headers=headers, data=data, verify=False)
-    logging.debug("[putWorkComment]### ADDED a message: \"{}\" to ServiceNow incident (sys_id): {}.".format(additionalComment, incidentSysId))
-    return response
-
-
-def getWebexItemDetails(botToken, messageId, webexUrl, itemSpecificUrl):
-    botToken = "Bearer " + botToken
-    headers = {
-        'Authorization': botToken,
-        'Accepts': 'application/json'}
-    url = webexUrl + itemSpecificUrl + messageId
-    response = requests.get(url, headers=headers, verify=False)
-    return response
-
-
-def postWebexMessage(botToken, spaceId, webexUrl, itemSpecificUrl, textMessage, attachments = []):
-    botToken = "Bearer " + botToken
-    textMarkdown = textMessage
-    headers = {
-        'Authorization': botToken,
-        'Accepts': 'application/json',
-        'Content-Type': 'application/json'}
-    data = "{\"roomId\" : \"" + spaceId + "\",\"text\" : \"" + textMessage + "\",\"markdown\" : \"" + textMarkdown + "\",\"attachments\" : " + str(attachments) + "}"
-    url  = webexUrl + itemSpecificUrl
-    logging.debug("[postWebexMessage]### SENT a message: \"{}\".".format(textMessage))
-    response = requests.post(url, headers=headers, data=data, verify=False)
-    #logging.debug("[postWebexMessage]### RECEIVED a response: \"{}\".".format(response.text))
-    return response
-
-def deleteWebexMessage(botToken, messageId, webexUrl, itemSpecificUrl):
-    botToken = "Bearer " + botToken
-    headers = {
-        'Authorization': botToken,
-        'Accepts': 'application/json',
-        'Content-Type': 'application/json'}
-    url  = webexUrl + itemSpecificUrl + messageId
-    response = requests.delete(url, headers=headers, verify=False)
-    logging.debug("[deleteWebexMessage]### DELETED a message with a messageId: \"{}\".".format(messageId))
-    return response
-
-
-def updateCommand(responseMessage, botToken, webexUrl, getRoomDetailsUrl):
-    comment = "User " + responseMessage["personEmail"] + " has added a comment: " + responseMessage["text"].split("Bot update")[1]
-    roomId = responseMessage["roomId"]
+def updateCommand(input: dict, botToken: str, webexUrl: str, getRoomDetailsUrl: str) -> dict:
+    """
+    Prepares data given by "@ServiceNowBot update <comments>" command and sends it over to putWorkComment function.
+    
+    :param input: Dictionary with details of the Webex message "@ServiceNowBot update <comments>" sent by user.
+    :param botToken: String with botToken information used for Webex API authentication.
+    :param webexUrl: URL string for Webex API.
+    :param getRoomDetailsUrl: URN string that identifies the Room resources within Webex API. 
+    :return: Dictionary with ServiceNow API response message generated by serviceNowLibrary.putWorkComment function.
+    """
+    comment = "User " + input["personEmail"] + " has added a comment: " + input["text"].split("Bot update")[1]
+    roomId = input["roomId"]
     response = getWebexItemDetails(botToken, roomId, webexUrl, getRoomDetailsUrl)
-    response = json.loads(response.text)
     incidentNumber = response["title"].split(" [")[0]
-    responseAccessToken = getAccessToken(clientId, clientSecret, refreshToken, url)
+    responseAccessToken = getAccessToken(clientId, clientSecret, refreshToken, url, username, password)
     accessToken = responseAccessToken["access_token"]
     responseIncidentSysId = getIncidentSysId(accessToken, incidentNumber, url)
-    responseIncidentSysId = json.loads(responseIncidentSysId.text)
     responseWorkComment = putWorkComment(accessToken, responseIncidentSysId["result"][0]["sys_id"], url, comment)
     return responseWorkComment
 
 
-def assignIncident(responseMessage, botToken, webexUrl, getRoomDetailsUrl, assignee):
+def assignIncident(input: dict, botToken: str, webexUrl: str, getRoomDetailsUrl: str, assignee: str) -> dict:
+    """
+    Prepares data given by "@ServiceNowBot assign <email_address>" command and sends it over to updateIncident function.
+    
+    :param input: Dictionary with details of the Webex message: "@ServiceNowBot assign <email_address>" sent by user.
+    :param botToken: String with botToken information used for Webex API authentication.
+    :param webexUrl: URL string for Webex API.
+    :param getRoomDetailsUrl: URN string that identifies the Room resources within Webex API. 
+    :param assignee: Sys_id string that identifies a user account in ServiceNow.
+    :return: Dictionary with ServiceNow API response message generated by serviceNowLibrary.updateIncident function.
+    """
     assignee = {"assigned_to": assignee}
-    roomId = responseMessage["roomId"]
+    roomId = input["roomId"]
     response = getWebexItemDetails(botToken, roomId, webexUrl, getRoomDetailsUrl)
-    response = json.loads(response.text)
     incidentNumber = response["title"].split(" [")[0]
-    responseAccessToken = getAccessToken(clientId, clientSecret, refreshToken, url)
+    responseAccessToken = getAccessToken(clientId, clientSecret, refreshToken, url, username, password)
     accessToken = responseAccessToken["access_token"]
     responseIncidentSysId = getIncidentSysId(accessToken, incidentNumber, url)
-    responseIncidentSysId = json.loads(responseIncidentSysId.text)
-    responseUpdateIncident = updateIncident(url, responseIncidentSysId["result"][0]["sys_id"], assignee)
+    responseUpdateIncident = updateIncident(getAccessToken(clientId, clientSecret, refreshToken, url, username, password)["access_token"], url, responseIncidentSysId["result"][0]["sys_id"], assignee)
     return responseUpdateIncident
 
 
-def createIncidentFlow(responseMessage):
-    responseGetPersonDetails = getWebexItemDetails(botToken, responseMessage["personId"], webexUrl, getPersonDetailsUrl)
-    responseGetPersonDetails = json.loads(responseGetPersonDetails.text)
-    responseGetUserSysId = getUserSysId(responseGetPersonDetails["emails"][0], url)
-    responseGetUserSysId = json.loads(responseGetUserSysId.text)
+def createIncidentFlow(input: dict) -> dict:
+    """
+    Prepares data given by Webex card: cards.createIncidentCard message to be send to ServiceNow and opens an Incident via serviceNowLibrary.createIncident function.
+    
+    :param input: Dictionary with details of the Webex card: cards.createIncidentCard sent by user.
+    :return: Dictionary with the ServiceNow resposne to POST incident message (the API call to SerivceNow to create an incident).
+    """
+    responseGetPersonDetails = getWebexItemDetails(botToken, input["personId"], webexUrl, getPersonDetailsUrl)
+    responseGetUserSysId = getUserSysId(getAccessToken(clientId, clientSecret, refreshToken, url, username, password)["access_token"], responseGetPersonDetails["emails"][0], url)
     if not responseGetUserSysId["result"]:
-        postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, "The account associated with your email: " + responseGetPersonDetails["emails"][0] + " is not available at ServiceNow. Please use an account existing in Service Now.")
+        postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl, "The account associated with your email: " + responseGetPersonDetails["emails"][0] + " is not available at ServiceNow. Please use an account existing in Service Now.")
         return ('Card received', 200)
-    if len(responseMessage["inputs"]["shortDescription"]) == 0:
-        postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, "In order to submit an incident please make sure that at least short description is filled in a card..")
+    if len(input["inputs"]["shortDescription"]) == 0:
+        postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl, "In order to submit an incident please make sure that at least short description is filled in a card..")
         return ('Card received', 200)
     textMessage = "Thank you for submitting an incident via ServiceNow Bot. Please standy as your incident is created."
-    postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
-    deleteWebexMessage(botToken, responseMessage["messageId"], webexUrl, getMessageDetailsUrl)
-    if "\n" in responseMessage["inputs"]["fullDescription"]:
-        responseMessage["inputs"]["fullDescription"] = responseMessage["inputs"]["fullDescription"].replace("\n"," ")
-    responseCreateIncident = createIncident(responseGetUserSysId["result"][0]["sys_id"], url, responseMessage["inputs"]["shortDescription"], responseMessage["inputs"]["fullDescription"], responseMessage["inputs"]["urgency"], responseMessage["inputs"]["checkbox"])
-    responseCreateIncident = json.loads(responseCreateIncident.text)
+    postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
+    deleteWebexMessage(botToken, input["messageId"], webexUrl, getMessageDetailsUrl)
+    if "\n" in input["inputs"]["fullDescription"]:
+        input["inputs"]["fullDescription"] = input["inputs"]["fullDescription"].replace("\n"," ")
+    responseCreateIncident = createIncident(getAccessToken(clientId, clientSecret, refreshToken, url, username, password)["access_token"], responseGetUserSysId["result"][0]["sys_id"], url, input["inputs"]["shortDescription"], input["inputs"]["fullDescription"], input["inputs"]["urgency"], input["inputs"]["checkbox"])
     textMessage = "Please be advised that the Incident: ```" + responseCreateIncident["result"]["number"] + "``` has been created. Please use the **Webex space** or the following link to track your newly created Incident: [LINK](https://dev70378.service-now.com/sp?id=ticket&is_new_order=true&table=incident&sys_id=" + responseCreateIncident["result"]["sys_id"] + ")"
-    postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
-    return
+    postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
+    return responseCreateIncident
 
 
 @app.route('/api/v1/resources/webhook', methods=['POST'])
 def webhook():
-
+    """
+    Captures messages sent to ServiceNow bot via direct spaces or via @mention in group spaces. It applies bot logic to those messages.
+    
+    :return: The HTTP response to a POST method received from Webex API.
+    """
     req = request.json
     if req["data"]["personEmail"] == botEmailAddress:
         logging.debug("RECEIVED a message from ServiceNow bot itself. The message was sent from: {}".format(req["data"]["personEmail"]))
         return ('Message received', 200)
     elif req["appId"] != webexAppId:
         logging.error("RECEIVED incorrect webexAppId: {}".format(req["appId"]))
-        logging.error("Full message: {}".format(req))
-        return ('Incorrect orgId', 401)
+        return ('Incorrect appId', 401)
     else:
         logging.debug("RECEIVED correct webexAppId: {}".format(req["appId"]))
-    logging.debug("RECEIVED correct orgId: {}".format(req))
     responseMessage = getWebexItemDetails(botToken, req["data"]["id"], webexUrl, getMessageDetailsUrl)
-    responseMessage = json.loads(responseMessage.text)
     logging.debug("RECEIVED a message: \"{}\" from user: {}.".format(responseMessage["text"], responseMessage["personEmail"]))
-    
     responseMessageList = " ".join(responseMessage["text"].split()).split(" ")
     if responseMessageList[0] == "ServiceNowBot":
         responseMessageList.pop(0)
     messageCommand = responseMessageList[0]
     logging.debug("RECEIVED a command message: {}".format(messageCommand))
-
     if messageCommand in ["help", "-h", "?", "/help", "start"]:
         if responseMessage["roomType"] == "direct":
             postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, markdownDisabledMessage, createWelcomeCard())
@@ -279,19 +145,15 @@ def webhook():
         return ('Message received', 200)
     elif messageCommand == "assign" and responseMessage["roomType"] == "group":
         if len(responseMessageList) == 2 and "@" in responseMessageList[1]:
-            responsegetUserSysId = getUserSysId(responseMessageList[1], url)
-            responsegetUserSysId = json.loads(responsegetUserSysId.text)
+            responsegetUserSysId = getUserSysId(getAccessToken(clientId, clientSecret, refreshToken, url, username, password)["access_token"], responseMessageList[1], url)
             if responsegetUserSysId["result"]:
-                responseAssignIncident = assignIncident(responseMessage, botToken, webexUrl, getRoomDetailsUrl, (responsegetUserSysId["result"][0]["sys_id"]))
-                responseAssignIncident = json.loads(responseAssignIncident.text)
+                assignIncident(responseMessage, botToken, webexUrl, getRoomDetailsUrl, (responsegetUserSysId["result"][0]["sys_id"]))
             else:
                 logging.error("NOT CREATED and incident as the ServiceNow does not have this account available: {}.".format(responseMessageList[1]))
                 postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, "The incident was not assigned. The provided email addres: {} is invalid. Please verify the email address.".format(responseMessageList[1]))
         elif len(responseMessageList) == 1:
-            responsegetUserSysId = getUserSysId(responseMessage["personEmail"], url)
-            responsegetUserSysId = json.loads(responsegetUserSysId.text)
-            responseAssignIncident = assignIncident(responseMessage, botToken, webexUrl, getRoomDetailsUrl, (responsegetUserSysId["result"][0]["sys_id"]))
-            responseAssignIncident = json.loads(responseAssignIncident.text)
+            responsegetUserSysId = getUserSysId(getAccessToken(clientId, clientSecret, refreshToken, url, username, password)["access_token"], responseMessage["personEmail"], url)
+            assignIncident(responseMessage, botToken, webexUrl, getRoomDetailsUrl, (responsegetUserSysId["result"][0]["sys_id"]))
         else:
             postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, "ServiceNow Bot has not recognized the command provided. Please use the ```@ServiceNowBot``` help to list available commands.")
     elif len(responseMessageList) >= 2:
@@ -302,8 +164,7 @@ def webhook():
                 postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, "Your comment has been added to the incident: ```" + responseWorkComment["result"]["number"] + "```.")
             return ('Message received', 200)
         elif messageCommand == "create" and responseMessageList[1] == "incident":
-            responsegetUserSysId = getUserSysId(responseMessage["personEmail"], url)
-            responsegetUserSysId = json.loads(responsegetUserSysId.text)
+            responsegetUserSysId = getUserSysId(getAccessToken(clientId, clientSecret, refreshToken, url, username, password)["access_token"], responseMessage["personEmail"], url)
             if responsegetUserSysId["result"]:
                 postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, markdownDisabledMessage, createIncidentCard())
             else:
@@ -325,38 +186,39 @@ def webhook():
 
 @app.route('/api/v1/resources/webhook/cards', methods=['POST'])
 def cards():
+    """
+    Captures attachment messages (Webex cards) sent to ServiceNow bot. It applies bot logic to those attachment messages (Webex cards).
+    
+    :return: The HTTP response to a POST method received from Webex API.
+    """
     req = request.json
     logging.debug("RECEIVED correct webexAppId: {}".format(req))
     if req["appId"] != webexAppId:
         logging.error("RECEIVED incorrect webexAppId: {}".format(req["appId"]))
-        logging.error("Full message: {}".format(req))
-        return ('Incorrect orgId', 401)
+        return ('Incorrect appId', 401)
     else:
         logging.debug("RECEIVED correct webexAppId: {}".format(req["appId"]))
     responseMessage = getWebexItemDetails(botToken, req["data"]["id"], webexUrl, getAttachmentDetailsUrl)
-    responseMessage = json.loads(responseMessage.text)
     logging.debug("RECEIVED the message regarding card submission. Flow type: {}".format(responseMessage["inputs"]["flow"]))
     responseGetPersonDetails = getWebexItemDetails(botToken, responseMessage["personId"], webexUrl, getPersonDetailsUrl)
-    responseGetPersonDetails = json.loads(responseGetPersonDetails.text)
     deleteWebexMessage(botToken, responseMessage["messageId"], webexUrl, getMessageDetailsUrl)
     if responseMessage["inputs"]["flow"] == "createIncident":
         createIncidentFlow(responseMessage)
-        time.sleep(3)
-        postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, markdownDisabledMessage, createWelcomeCard())
+        responseGetWebexItemDetails = getWebexItemDetails(botToken, responseMessage["roomId"], webexUrl, getRoomDetailsUrl)
+        if responseGetWebexItemDetails["type"] == "direct":
+            time.sleep(3)
+            postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, markdownDisabledMessage, createWelcomeCard())
     elif responseMessage["inputs"]["flow"] == "createIncidentCard":
-        responsegetUserSysId = getUserSysId(responseGetPersonDetails["emails"][0], url)
-        responsegetUserSysId = json.loads(responsegetUserSysId.text)
+        responsegetUserSysId = getUserSysId(getAccessToken(clientId, clientSecret, refreshToken, url, username, password)["access_token"], responseGetPersonDetails["emails"][0], url)
         if responsegetUserSysId["result"]:
             postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, markdownDisabledMessage, createIncidentCard())
         else:
             postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, "The account associated with your email: " + responseGetPersonDetails["emails"][0] + " is not available at ServiceNow. Please use account existing in Service Now.")
             return ('Message received', 200)
     elif responseMessage["inputs"]["flow"] == "previousIncidents":
-        responsegetUserSysId = getUserSysId(responseGetPersonDetails["emails"][0], url)
-        responsegetUserSysId = json.loads(responsegetUserSysId.text)
+        responsegetUserSysId = getUserSysId(getAccessToken(clientId, clientSecret, refreshToken, url, username, password)["access_token"], responseGetPersonDetails["emails"][0], url)
         if responsegetUserSysId["result"]:
-            responsGetPreviousIncidents = getPreviousIncidents(url, responsegetUserSysId["result"][0]["sys_id"], 5)
-            responsGetPreviousIncidents = json.loads(responsGetPreviousIncidents.text)
+            responsGetPreviousIncidents = getPreviousIncidents(getAccessToken(clientId, clientSecret, refreshToken, url, username, password)["access_token"], url, responsegetUserSysId["result"][0]["sys_id"], 5)
             incidentList = []
             for incident in responsGetPreviousIncidents["result"]:
                 incidentDict = {"number": incident["number"], "state": incidentStates[incident["state"]], "shortDescription": incident["short_description"], "spaceId": incident["x_773797_webex_dem_spaceid"], "sysId": incident["sys_id"]}
@@ -374,7 +236,7 @@ def cards():
         postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, markdownDisabledMessage, createWelcomeCard())
         feedbackText = "User {} has shared feedback:<br /> ```{}``` ".format(responseGetPersonDetails["emails"][0], responseMessage["inputs"]["feedbackText"])
         responsePostWebexMessage = postWebexMessage(botToken, feedbackSpaceId, webexUrl, getMessageDetailsUrl, feedbackText)
-        logging.debug("RECEIVED the response to sending a message: {}".format(responsePostWebexMessage.text))
+        logging.debug("RECEIVED the response to sending a message: {}".format(responsePostWebexMessage))
     elif responseMessage["inputs"]["flow"] == "goBack":
         postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, markdownDisabledMessage, createWelcomeCard())
     else:
@@ -385,21 +247,23 @@ def cards():
 
 @app.route('/api/v1/resources/webhook/membership', methods=['POST'])
 def membership():
+    """
+    Captures membership create events applied to ServiceNow bot. This represent either adding ServiceNow bot to group space or opening a 1:1 (direct) space with ServiceNow bot.
+    
+    :return: The HTTP response to a POST method received from Webex API.
+    """
     req = request.json
     if req["data"]["personEmail"] == botEmailAddress:
         logging.debug("RECEIVED a message from ServiceNow bot itself. The message was sent from: {}".format(req["data"]["personEmail"]))
         return ('Message received', 200)
     elif req["appId"] != webexAppId:
         logging.error("RECEIVED incorrect webexAppId: {}".format(req["appId"]))
-        logging.error("Full message: {}".format(req))
-        return ('Incorrect orgId', 401)
+        return ('Incorrect appId', 401)
     else:
         logging.debug("RECEIVED correct webexAppId: {}".format(req["appId"]))
     #logging.debug("RECEIVED membership creation event: {}".format(req))
     responseGetWebexItemDetails = getWebexItemDetails(botToken, req["data"]["roomId"], webexUrl, getRoomDetailsUrl)
-    responseGetWebexItemDetails = json.loads(responseGetWebexItemDetails.text)
     responseGetPersonDetails = getWebexItemDetails(botToken, responseGetWebexItemDetails["creatorId"], webexUrl, getPersonDetailsUrl)
-    responseGetPersonDetails = json.loads(responseGetPersonDetails.text)
     logging.debug("RECEIVED room details: {}".format(responseGetWebexItemDetails))
     logging.debug("RECEIVED a notification about new space created with user: {} in a space type: {}.".format(responseGetPersonDetails["emails"][0], responseGetWebexItemDetails["type"]))
     emailDomain = responseGetPersonDetails["emails"][0].split("@")[1]
@@ -407,8 +271,6 @@ def membership():
         textMessage = "Welcome! **ServiceNow bot** is at your service. <br />Please take a look at the below options or type in help:"
         postWebexMessage(botToken, req["data"]["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
         responsePostWebexMessage = postWebexMessage(botToken, req["data"]["roomId"], webexUrl, getMessageDetailsUrl, markdownDisabledMessage, createWelcomeCard())
-        print(responsePostWebexMessage)
-        responsePostWebexMessage = json.loads(responsePostWebexMessage.text)
         logging.debug("RECEIVED the response to the createWelcomeCard: ".format(responsePostWebexMessage))
     elif responseGetWebexItemDetails["type"] == "direct":
         textMessage = "Unfortunately, your account is not part of the AON Webex organization. Please contact your IT Service Desk to resolve this issue."
