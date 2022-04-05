@@ -145,7 +145,7 @@ def webhook():
     ### Verify if user email address is part 
     emailDomain = responseMessage["personEmail"].split("@")[1].strip()
     if emailDomain not in domains() and (emailDomain != "gmail.com" and responseMessage["personEmail"][0:5] != "eufun"):
-        textMessage = "Unfortunately, your account is not part of the AON Webex organization. Please contact your IT Service Desk to resolve this issue."
+        textMessage = "Unfortunately, your account is not part of the Webex organization. Please contact your IT Service Desk to resolve this issue."
         postWebexMessage(botToken, req["data"]["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
         return ('Message received', 200)
     ### User typed in the "start/help etc." command.
@@ -357,7 +357,7 @@ def membership():
         responsePostWebexMessage = postWebexMessage(botToken, req["data"]["roomId"], webexUrl, getMessageDetailsUrl, markdownDisabledMessage, createWelcomeCard(iconUrl, faqUrl, spaceIdUrl))
         logging.debug("RECEIVED the response to the createWelcomeCard: {}".format(responsePostWebexMessage))
     elif responseGetWebexItemDetails["type"] == "direct":
-        textMessage = "Unfortunately, your account is not part of the AON Webex organization. Please contact your IT Service Desk to resolve this issue."
+        textMessage = "Unfortunately, your account is not part of the Webex organization. Please contact your IT Service Desk to resolve this issue."
         postWebexMessage(botToken, req["data"]["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
     return ('Membership received', 200)
 

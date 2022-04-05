@@ -2,6 +2,8 @@ import requests
 import json
 import urllib.parse
 import logging
+import time
+import connectDb
 
 logging.basicConfig(level=logging.DEBUG,format='%(asctime)s %(levelname)s %(message)s', filename='./WebexBotEndpoint.log', filemode='a')
 
@@ -39,6 +41,12 @@ def getAccessToken(clientId: str, clientSecret: str, refreshToken: str, url: str
     :param password: ServiceNow bot password at ServiceNow instance. 
     :return: Dictionary with ServiceNow API response for the AccessToken POST message.
     """
+    access_token = connectDb.connect("access_token", "value, expiry")
+    logging.debug("[getAccessToken]### RETRIEVED access token table {}".format(access_token))
+    for key in access_token:
+        if int(access_token[key]) > int(time.time()):
+            logging.debug("[getAccessToken]### Access Token is still valid. Expiry of current access token: {}, current time {}".format(int(access_token[key]), int(time.time())))
+            return {"access_token": key, "refresh_token": refreshToken, 'scopte': 'useraccount', 'token_type': 'Bearer', 'expires_in': 1770}
     data = {
                 'grant_type': 'refresh_token',
                 'client_id': clientId,
@@ -47,8 +55,13 @@ def getAccessToken(clientId: str, clientSecret: str, refreshToken: str, url: str
     url = url + "/oauth_token.do"
     responseAccessToken = requests.post(url, data=data, verify=False)
     if responseAccessToken.status_code == 200:
+        ### Catching developer instance of ServiceNow in hibernated status.
+        if "Instance Hibernating page" in responseAccessToken.text:
+            logging.error("[getAccessToken]### ERROR: ServiceNow {} is hibernated at this moment.".format(url))
         responseAccessToken = json.loads(responseAccessToken.text)
         logging.debug("[getAccessToken]### RETRIEVED succesfully access token.")
+        responseUpdateAccessToken = connectDb.updateAccessToken(1, responseAccessToken["access_token"], int(time.time()+1770))
+        logging.debug("[getAccessToken]### Update database with access token.")
     elif responseAccessToken.status_code == 401:
         responseRefreshToken = getRefreshToken(clientId, clientSecret, username, password, url)
         responseRefreshToken = json.loads(responseRefreshToken.text)
@@ -142,7 +155,7 @@ def updateIncident(accessToken: str, url: str, sysId: str, updatedAttributes: di
     url = url + "/api/now/table/incident/" + sysId
     response = requests.patch(url, headers=headers, data=data, verify=False)
     response = json.loads(response.text)
-    logging.debug("[createIncident]### UPDATED an incident in ServiceNow: \"{}\" with sys_id: {}.".format(response["result"]["number"], response["result"]["sys_id"]))
+    logging.debug("[updateIncident]### UPDATED an incident in ServiceNow: \"{}\" with sys_id: {}.".format(response["result"]["number"], response["result"]["sys_id"]))
     return response
 
 
