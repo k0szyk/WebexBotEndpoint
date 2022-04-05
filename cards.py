@@ -32,7 +32,7 @@ def createWelcomeCard(iconUrl: str, faqUrl: str, spaceIdUrl: str) -> str:
                         \"type\": \"Column\",\
                         \"items\": [\
                             {\"type\": \"TextBlock\",\
-                            \"text\": \"Aon Service Now bot\",\
+                            \"text\": \"Service Now bot\",\
                             \"weight\": \"Lighter\",\
                             \"color\": \"Accent\"},\
                             {\"type\": \"TextBlock\",\
@@ -105,7 +105,7 @@ def createIncidentCard(iconUrl: str) -> str:
                         \"type\": \"Column\",\
                         \"items\": [\
                             {\"type\": \"TextBlock\",\
-                            \"text\": \"Aon Service Now Bot\",\
+                            \"text\": \"Service Now Bot\",\
                             \"weight\": \"Lighter\",\
                             \"color\": \"Accent\"},\
                             {\"type\": \"TextBlock\",\
@@ -195,7 +195,7 @@ def previousIncidentsCard(incidentList: list, url: str, iconUrl: str) -> str:
                         \"type\": \"Column\",\
                         \"items\": [\
                             {\"type\": \"TextBlock\",\
-                            \"text\": \"Aon Service Now bot\",\
+                            \"text\": \"Service Now bot\",\
                             \"weight\": \"Lighter\",\
                             \"color\": \"Accent\"},\
                             {\"type\": \"TextBlock\",\
@@ -243,7 +243,7 @@ def createFeedbackCard(iconUrl: str) -> str:
                         \"type\": \"Column\",\
                         \"items\": [\
                             {\"type\": \"TextBlock\",\
-                            \"text\": \"Aon Service Now bot\",\
+                            \"text\": \"Service Now bot\",\
                             \"weight\": \"Lighter\",\
                             \"color\": \"Accent\"},\
                             {\"type\": \"TextBlock\",\
@@ -314,7 +314,7 @@ def createUpdateIncidentCard(incidentList: list, iconUrl: str, isVisible = "true
                         \"type\": \"Column\",\
                         \"items\": [\
                             {\"type\": \"TextBlock\",\
-                            \"text\": \"Aon Service Now bot\",\
+                            \"text\": \"Service Now bot\",\
                             \"weight\": \"Lighter\",\
                             \"color\": \"Accent\"},\
                             {\"type\": \"TextBlock\",\
