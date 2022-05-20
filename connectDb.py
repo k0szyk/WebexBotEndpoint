@@ -25,14 +25,17 @@ def connect(tableName, columns):
     try:
 
         params = config()
-        logging.debug("Connecting to the PostgreSQL database...")
+        logging.debug("Connecting to the PostgreSQL database to fetch data from: {}".format(tableName))
         conn = psycopg2.connect(**params)
         cur = conn.cursor()
         cur.execute("SELECT {} FROM {};".format(columns, tableName))
         row = cur.fetchone()
         data = {}
         while row is not None:
-            data[row[0]] = row[1]
+            if len(row) == 2:
+                data[row[0]] = row[1]
+            else:
+                data[row[0]] = row[1:]
             row = cur.fetchone()
         cur.close()
         conn.close()
@@ -40,8 +43,8 @@ def connect(tableName, columns):
     except (Exception, psycopg2.DatabaseError) as error:
         logging.error("Encountered the following exception while connecting to DB: {}.".format(error))
 
-def updateAccessToken(id, value, expiry):
-    sql = """ UPDATE access_token
+def updateAccessToken(tableName, id, value, expiry):
+    sql = """ UPDATE %s
                 SET value= %s, expiry = %s
                 WHERE id = %s"""
     conn = None
@@ -51,7 +54,7 @@ def updateAccessToken(id, value, expiry):
         logging.debug("Connecting to the PostgreSQL database...")
         conn = psycopg2.connect(**params)
         cur = conn.cursor()
-        cur.execute(sql, (value, expiry, id))
+        cur.execute(sql, (tableName, value, expiry, id))
         updated_rows = cur.rowcount
         conn.commit()
         cur.close()
@@ -61,3 +64,4 @@ def updateAccessToken(id, value, expiry):
         if conn is not None:
             conn.close()
     return updated_rows
+

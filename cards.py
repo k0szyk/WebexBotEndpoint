@@ -49,7 +49,10 @@ def createWelcomeCard(iconUrl: str, faqUrl: str, spaceIdUrl: str) -> str:
                 \"text\": \"* To **create an incident** press ```Create Incident``` button.\",\
                 \"wrap\": true},\
                 {\"type\": \"TextBlock\",\
-                \"text\": \"* To verify the status of already opened incident press ```Opened Incidents```.\",\
+                \"text\": \"* To verify the status of already opened incident press ```Previous Incidents```.\",\
+                \"wrap\": true},\
+                {\"type\": \"TextBlock\",\
+                \"text\": \"* To update the incident with a work note press ```Update an Incidents```.\",\
                 \"wrap\": true},\
                 {\"type\": \"TextBlock\",\
                 \"text\": \"* If you have some ideas on how to improve the bot, please select ```Feedback```.\",\
@@ -271,6 +274,7 @@ def createFeedbackCard(iconUrl: str) -> str:
                     \"flow\": \"goBack\"}}]}}]"
     return payload
 
+
 def createUpdateIncidentCard(incidentList: list, iconUrl: str, isVisible = "true", value = "") -> str:
     """
     Contains a payload required to create a Webex card - createUpdateIncidentCard.
@@ -280,66 +284,158 @@ def createUpdateIncidentCard(incidentList: list, iconUrl: str, isVisible = "true
     :param isVisible: String specifing if incidents drop list is visible or not.
     :param value: String representing a default incident - used when only when we know what is the incident to be updated.
     :return: String with a payload required to create a Webex card - createUpdateIncidentCard.
-    """ 
+    """
     incidentString = ""
     for incident in incidentList:
         if incident["state"] != "Closed" and incident["state"] != "Resolved":
             if incidentString != "":
                 incidentString = incidentString + ","
             incidentString = incidentString + "{\"title\": \"" + incident["number"] + "\",\"value\": \"" + incident["number"] + "\"}"
-            
-    logging.debug("Prepared the incident string: {}".format(incidentString))
-
-    if isVisible == "true":
-        actions = "[{\"type\": \"Action.Submit\",\"title\": \"Submit\",\"data\":{\"flow\": \"submitUpdate\"}},{\"type\": \"Action.Submit\",\"title\": \"Go back\",\"data\":{\"flow\": \"goBack\"}}]"
+    if incidentString == "":
+        actions = "[{\"type\": \"Action.Submit\",\"title\": \"Go back\",\"data\":{\"flow\": \"goBack\"}}]"
+        payload = "[{\
+                            \"contentType\": \"application/vnd.microsoft.card.adaptive\",\
+                            \"content\": \
+                                {\"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",\
+                                \"type\": \"AdaptiveCard\",\
+                                \"version\": \"1.2\",\
+                                \"body\": [{\
+                                    \"type\": \"ColumnSet\",\
+                                    \"columns\": [{\
+                                        \"type\": \"Column\",\
+                                        \"items\": [{\
+                                            \"type\": \"Image\",\
+                                            \"url\": \"" + iconUrl + "\",\
+                                            \"size\": \"Medium\",\
+                                            \"height\": \"50px\"}],\
+                                        \"width\": \"auto\"},{\
+                                            \"type\": \"Column\",\
+                                            \"items\": [\
+                                                {\"type\": \"TextBlock\",\
+                                                \"text\": \"Service Now bot\",\
+                                                \"weight\": \"Lighter\",\
+                                                \"color\": \"Accent\"},\
+                                                {\"type\": \"TextBlock\",\
+                                                \"weight\": \"Bolder\",\
+                                                \"text\": \"Update an incident:\",\
+                                                \"wrap\": true,\
+                                                \"color\": \"Light\",\
+                                                \"size\": \"Large\",\
+                                                \"spacing\": \"Small\"}]}]},\
+                                                {\"type\": \"TextBlock\",\
+                                                \"text\": \"We were not able to find any open incident wihtin last 30 incidents raised by you. Please click below **Go Back** button to return to the Welcome Card and raise a new incident if you would like.\",\
+                                                \"isVisible\": " + isVisible + ",\
+                                                \"wrap\": true}],\
+                                \"actions\": " + actions + "}}]"
+        return payload
     else:
-        actions = "[{\"type\": \"Action.Submit\",\"title\": \"Submit\",\"data\":{\"flow\": \"submitUpdateDirect\"}}]"
-    logging.debug("Prepared the actions string: {}".format(actions))
-    payload = "[{\
-        \"contentType\": \"application/vnd.microsoft.card.adaptive\",\
-        \"content\": \
-            {\"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",\
-            \"type\": \"AdaptiveCard\",\
-            \"version\": \"1.2\",\
-            \"body\": [{\
-                \"type\": \"ColumnSet\",\
-                \"columns\": [{\
-                    \"type\": \"Column\",\
-                    \"items\": [{\
-                        \"type\": \"Image\",\
-                        \"url\": \"" + iconUrl + "\",\
-                        \"size\": \"Medium\",\
-                        \"height\": \"50px\"}],\
-                    \"width\": \"auto\"},{\
+        if isVisible == "true":
+            actions = "[{\"type\": \"Action.Submit\",\"title\": \"Submit\",\"data\":{\"flow\": \"submitUpdate\"}},{\"type\": \"Action.Submit\",\"title\": \"Go back\",\"data\":{\"flow\": \"goBack\"}}]"
+        else:
+            actions = "[{\"type\": \"Action.Submit\",\"title\": \"Submit\",\"data\":{\"flow\": \"submitUpdateDirect\"}}]"
+        payload = "[{\
+            \"contentType\": \"application/vnd.microsoft.card.adaptive\",\
+            \"content\": \
+                {\"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",\
+                \"type\": \"AdaptiveCard\",\
+                \"version\": \"1.2\",\
+                \"body\": [{\
+                    \"type\": \"ColumnSet\",\
+                    \"columns\": [{\
                         \"type\": \"Column\",\
-                        \"items\": [\
-                            {\"type\": \"TextBlock\",\
-                            \"text\": \"Service Now bot\",\
-                            \"weight\": \"Lighter\",\
-                            \"color\": \"Accent\"},\
-                            {\"type\": \"TextBlock\",\
-                            \"weight\": \"Bolder\",\
-                            \"text\": \"Update an incident:\",\
-                            \"wrap\": true,\
-                            \"color\": \"Light\",\
-                            \"size\": \"Large\",\
-                            \"spacing\": \"Small\"}]}]},\
-                            {\"type\": \"TextBlock\",\
-                            \"text\": \"Please select an incident:\",\
-                            \"isVisible\": " + isVisible + ",\
-                            \"wrap\": true},\
-                            {\"type\": \"Input.ChoiceSet\",\
-                            \"choices\": [" + incidentString + "],\
-                            \"placeholder\": \"Select an incident\",\
-                            \"value\": \"" + value + "\",\
-                            \"isVisible\": " + isVisible + ",\
-                            \"id\": \"incidentNumber\"},\
-                            {\"type\": \"TextBlock\",\
-                            \"text\": \"Please type in your comment/update to be added to the incident:\",\
-                            \"wrap\": true},\
-                            {\"type\": \"Input.Text\",\
-                            \"id\": \"updateText\",\
-                            \"placeholder\": \"Your comments...\",\
-                            \"isMultiline\": true}],\
-            \"actions\": " + actions + "}}]"
+                        \"items\": [{\
+                            \"type\": \"Image\",\
+                            \"url\": \"" + iconUrl + "\",\
+                            \"size\": \"Medium\",\
+                            \"height\": \"50px\"}],\
+                        \"width\": \"auto\"},{\
+                            \"type\": \"Column\",\
+                            \"items\": [\
+                                {\"type\": \"TextBlock\",\
+                                \"text\": \"Service Now bot\",\
+                                \"weight\": \"Lighter\",\
+                                \"color\": \"Accent\"},\
+                                {\"type\": \"TextBlock\",\
+                                \"weight\": \"Bolder\",\
+                                \"text\": \"Update an incident:\",\
+                                \"wrap\": true,\
+                                \"color\": \"Light\",\
+                                \"size\": \"Large\",\
+                                \"spacing\": \"Small\"}]}]},\
+                                {\"type\": \"TextBlock\",\
+                                \"text\": \"Please select an incident:\",\
+                                \"isVisible\": " + isVisible + ",\
+                                \"wrap\": true},\
+                                {\"type\": \"Input.ChoiceSet\",\
+                                \"choices\": [" + incidentString + "],\
+                                \"placeholder\": \"Select an incident\",\
+                                \"value\": \"" + value + "\",\
+                                \"isVisible\": " + isVisible + ",\
+                                \"id\": \"incidentNumber\"},\
+                                {\"type\": \"TextBlock\",\
+                                \"text\": \"Please type in your comment/update to be added to the incident:\",\
+                                \"wrap\": true},\
+                                {\"type\": \"Input.Text\",\
+                                \"id\": \"updateText\",\
+                                \"placeholder\": \"Your comments...\",\
+                                \"isMultiline\": true}],\
+                \"actions\": " + actions + "}}]"
+        return payload
+
+
+def create_emergency_incident_card(incident: str, iconUrl: str, meeting_link: str, url: str) -> str:
+    """
+    Contains a payload required to create a Webex card - Emergency Incident Card.
+
+    :param incident: String representing the incident number.
+    :param iconUrl: String with icon URL (branding).
+    :param meeting_link: String representing the Webex link to join the meeting.
+    :param url: String representing the ServiceNow instance url.
+    :return: String with a payload required to create a Webex card - createUpdateIncidentCard.
+    """
+    actions = "[{\"type\": \"Action.Submit\",\"title\": \"Go back\",\"data\":{\"flow\": \"goBack\"}}]"
+    incident_link = "{}/nav_to.do?uri=incident.do?sysparm_query=number={}".format(url, incident)
+    payload = "[{\
+                \"contentType\": \"application/vnd.microsoft.card.adaptive\",\
+                \"content\": \
+                    {\"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",\
+                    \"type\": \"AdaptiveCard\",\
+                    \"version\": \"1.2\",\
+                    \"body\": [{\
+                        \"type\": \"ColumnSet\",\
+                        \"columns\": [{\
+                            \"type\": \"Column\",\
+                            \"items\": [{\
+                                \"type\": \"Image\",\
+                                \"url\": \"" + iconUrl + "\",\
+                                \"size\": \"Medium\",\
+                                \"height\": \"50px\"}],\
+                            \"width\": \"auto\"},{\
+                                \"type\": \"Column\",\
+                                \"items\": [\
+                                    {\"type\": \"TextBlock\",\
+                                    \"text\": \"Service Now bot\",\
+                                    \"weight\": \"Lighter\",\
+                                    \"color\": \"Accent\"},\
+                                    {\"type\": \"TextBlock\",\
+                                    \"weight\": \"Bolder\",\
+                                    \"text\": \"Emeregency incident: **" + incident + "**\",\
+                                    \"wrap\": true,\
+                                    \"color\": \"Light\",\
+                                    \"size\": \"Large\",\
+                                    \"spacing\": \"Small\"}]}]},\
+                                    {\"type\": \"TextBlock\",\
+                                    \"text\": \"Emergency Meeting join link: [Webex Meeting](" + meeting_link + ")\",\
+                                    \"wrap\": true},\
+                                    {\"type\": \"TextBlock\",\
+                                    \"text\": \"ServiceNow incident link: [" + incident + "](" + incident_link + ")\",\
+                                    \"wrap\": true},\
+                                    {\"type\": \"TextBlock\",\
+                                    \"text\": \"Please type in below the work comment/update to be added to the incident:\",\
+                                    \"wrap\": true},\
+                                    {\"type\": \"Input.Text\",\
+                                    \"id\": \"updateText\",\
+                                    \"placeholder\": \"Work comments...\",\
+                                    \"isMultiline\": true}],\
+                                    \"actions\": [{\"type\": \"Action.Submit\",\"title\": \"Submit\",\"data\":{\"flow\": \"submitUpdateEmergency\", \"incidentNumber\": \"" + incident + "\", \"webLink\": \"" + meeting_link + "\"}}]}}]"
     return payload
