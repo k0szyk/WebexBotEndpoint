@@ -2,24 +2,30 @@ import json
 import flask
 import logging
 import time
+import requests
 from flask import request
-from cards import createIncidentCard, createWelcomeCard, previousIncidentsCard, createFeedbackCard, createUpdateIncidentCard
-from serviceNowLibrary import getAccessToken, getIncidentSysId, getUserSysId, createIncident, updateIncident, getPreviousIncidents, putWorkComment
-from webexLibrary import getWebexItemDetails, postWebexMessage, deleteWebexMessage
+from flask_api import status
+from cards import createIncidentCard, createWelcomeCard, previousIncidentsCard, createFeedbackCard, createUpdateIncidentCard, create_emergency_incident_card
+from serviceNowLibrary import getAccessToken, getIncidentSysId, getUserSysId, get_element_parameter, createIncident, updateIncident, getPreviousIncidents, putWorkComment, approval, getApproval, getApprovalbyChangeId
+from webexLibrary import getWebexItemDetails, postWebexMessage, deleteWebexMessage, createWebexMeeting, refreshWebexToken
+from connectDb import connect, updateAccessToken
 from domains import domains
-from connectDb import connect
 
 logging.basicConfig(level=logging.DEBUG,format='%(asctime)s %(levelname)s %(message)s', filename='./WebexBotEndpoint.log', filemode='a')
 #Retrieving credentials from database
 credentials = connect("credentials", "name, value")
+
+webexAppId = credentials["webexAppId"] #AppId that identifies the bot.
+botToken = credentials["botToken"] #Token Used to authenticate against the Webex API.
+feedbackSpaceId = credentials["feedbackSpaceId"] #SpaceId that is used to leave feedback.
+botEmailAddress = credentials["botEmailAddress"]
+xApiKey = credentials["X-Api-Key"]
+webex_client_id = credentials["webexClientId"]
+webex_secret_id = credentials["webexSecretId"]
+#webexOrgId = credentials["webexOrgId"]
+
 #Retrieving urls from database
 urls = connect("urls", "name, value")
-
-botToken = credentials["botToken"] #Token Used to authenticate against the Webex API.
-webexOrgId = credentials["webexOrgId"]
-webexAppId = credentials["webexAppId"] #AppId that identifies the bot.
-feedbackSpaceId = credentials["feedbackSpaceId"] #SpaceId that is used to leave feedback.
-botEmailAddress = credentials["botEmailAddress"] 
 
 webexUrl = urls["webexUrl"] #URL to Webex API.
 getMessageDetailsUrl = urls["getMessageDetailsUrl"] #URL for message resource in Webex API.
@@ -93,7 +99,7 @@ def assignIncident(input: dict, botToken: str, webexUrl: str, getRoomDetailsUrl:
     return responseUpdateIncident
 
 
-def createIncidentFlow(input: dict) -> dict:
+def createIncidentFlow(input: dict):
     """
     Prepares data given by Webex card: cards.createIncidentCard message to be send to ServiceNow and opens an Incident via serviceNowLibrary.createIncident function.
     
@@ -117,6 +123,107 @@ def createIncidentFlow(input: dict) -> dict:
     textMessage = "Please be advised that the Incident: ```" + responseCreateIncident["result"]["number"] + "``` has been created. Please use the **Webex space** or the following link to track your newly created Incident: [LINK](https://dev70378.service-now.com/sp?id=ticket&is_new_order=true&table=incident&sys_id=" + responseCreateIncident["result"]["sys_id"] + ")"
     postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
     return responseCreateIncident
+
+
+def approvalFlow(input: dict):
+    """
+    Prepares data given by approval Webex card message to be send to ServiceNow and opens an approve/reject via serviceNowLibrary.approval function.
+
+    :param input: Dictionary with details of the approval Webex card sent by user.
+    :return: Dictionary with the ServiceNow resposne to PATCH approval message (the API call to SerivceNow to approve/reject a change).
+    """
+    responseGetPersonDetails = getWebexItemDetails(botToken, input["personId"], webexUrl, getPersonDetailsUrl)
+    responseGetUserSysId = getUserSysId(getAccessToken(credentials["clientId"], credentials["clientSecret"], credentials["refreshToken"], url, credentials["username"], credentials["password"])["access_token"], responseGetPersonDetails["emails"][0], url)
+    reponseGetApproval = getApproval(getAccessToken(credentials["clientId"], credentials["clientSecret"], credentials["refreshToken"], url, credentials["username"], credentials["password"])["access_token"], url, input["inputs"]["sysid"])
+    if not responseGetUserSysId["result"]:
+        postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl,"The account associated with your email: " + responseGetPersonDetails["emails"][0] + " is not available at ServiceNow. Please use an account existing in Service Now.")
+        return ('Card received', 200)
+    if  responseGetUserSysId["result"][0]["sys_id"] != reponseGetApproval["result"]["approver"]["value"]:
+        postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl, "Your Webex account email address does not match the Service Now approver email address. Please get in touch with ServiceNowBot team for further assistance.")
+        return ('Card received', 200)
+    textMessage = "Thank you for submitting your choice."
+    postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
+    if "\n" in input["inputs"]["comments"]:
+        input["inputs"]["comments"] = input["inputs"]["comments"].replace("\n"," ")
+    logging.debug("input: {}, type: {}".format(input["inputs"]["sysid"], type(input["inputs"]["sysid"])))
+    if input["inputs"]["approve"]:
+        if input["inputs"]["comments"]:
+            comments = "User {} has approved this request via Webex_Bot with comments: \"{}\".".format(responseGetPersonDetails["emails"][0], input["inputs"]["comments"])
+        else:
+            comments = "User {} has approved this request via Webex_Bot.".format(responseGetPersonDetails["emails"][0])
+        data = {"state": "approved", "approver": responseGetUserSysId["result"][0]["sys_id"], "comments": comments}
+        logging.debug("sysid: {}".format(input["inputs"]["sysid"]))
+        approval(getAccessToken(credentials["clientId"], credentials["clientSecret"], credentials["refreshToken"], url, credentials["username"], credentials["password"])["access_token"], url, input["inputs"]["sysid"], data)
+    else:
+        if input["inputs"]["comments"]:
+            comments = "User {} has rejected this request via Webex_Bot with comments: \"{}\".".format(responseGetPersonDetails["emails"][0], input["inputs"]["comments"])
+        else:
+            comments = "User {} has rejected this request via Webex_Bot.".format(responseGetPersonDetails["emails"][0])
+        data = {"state": "rejected", "approver": responseGetUserSysId["result"][0]["sys_id"], "comments": comments}
+        approval(getAccessToken(credentials["clientId"], credentials["clientSecret"], credentials["refreshToken"], url, credentials["username"], credentials["password"])["access_token"], url, input["inputs"]["sysid"], data)
+    textMessage = "Please be advised that this Change Request has been {}.".format(data["state"])
+    postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
+    return
+
+
+def approvalChangeRequestFlow(input: dict):
+    """
+    Prepares data given by Change Request Webex card message to be send to ServiceNow and opens an approve/reject via serviceNowLibrary.approval function.
+
+    :param input: Dictionary with details of the approval Webex card sent by user.
+    :return: Dictionary with the ServiceNow resposne to PATCH approval message (the API call to SerivceNow to approve/reject a change).
+    """
+    url = "https://dev70378.service-now.com"
+    sysapproval_value = ""
+    responseGetPersonDetails = getWebexItemDetails(botToken, input["personId"], webexUrl, getPersonDetailsUrl)
+    responseGetUserSysId = getUserSysId(getAccessToken(credentials["clientId"], credentials["clientSecret"], credentials["refreshToken"], url, credentials["username"], credentials["password"])["access_token"], responseGetPersonDetails["emails"][0], url)
+    reponseGetApprovalbyChangeId = getApprovalbyChangeId(getAccessToken(credentials["clientId"], credentials["clientSecret"], credentials["refreshToken"], url, credentials["username"], credentials["password"])["access_token"], url, input["inputs"]["sysid"])
+    if not responseGetUserSysId["result"]:
+        postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl,"The account associated with your email: " + responseGetPersonDetails["emails"][0] + " is not available at ServiceNow. Please use an account existing in Service Now.")
+        return ('Card received', 200)
+    for element in reponseGetApprovalbyChangeId["result"]:
+        if responseGetUserSysId["result"][0]["sys_id"] == element["approver"]["value"] and element["state"] == "requested":
+            sysapproval_id = element["sys_id"]
+    if not sysapproval_id:
+        postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl, "Your Webex account email address does not match the Service Now approver email address list. Please get in touch with ServiceNowBot team for further assistance.")
+        return ('Card received', 200)
+    postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl, "Thank you for submitting your choice.")
+    if "\n" in input["inputs"]["comments"]:
+        input["inputs"]["comments"] = input["inputs"]["comments"].replace("\n"," ")
+    logging.debug("sysapproval_id: {}, type: {}".format(sysapproval_id, type(sysapproval_id)))
+    if input["inputs"]["approve"]:
+        if input["inputs"]["comments"]:
+            comments = "User {} has approved this request via Webex_Bot with comments: \"{}\".".format(responseGetPersonDetails["emails"][0], input["inputs"]["comments"])
+        else:
+            comments = "User {} has approved this request via Webex_Bot.".format(responseGetPersonDetails["emails"][0])
+        data = {"state": "approved", "approver": responseGetUserSysId["result"][0]["sys_id"], "comments": comments}
+        approval(getAccessToken(credentials["clientId"], credentials["clientSecret"], credentials["refreshToken"], url, credentials["username"], credentials["password"])["access_token"], url, sysapproval_id, data)
+    else:
+        if input["inputs"]["comments"]:
+            comments = "User {} has rejected this request via Webex_Bot with comments: \"{}\".".format(responseGetPersonDetails["emails"][0], input["inputs"]["comments"])
+        else:
+            comments = "User {} has rejected this request via Webex_Bot.".format(responseGetPersonDetails["emails"][0])
+        data = {"state": "rejected", "approver": responseGetUserSysId["result"][0]["sys_id"], "comments": comments}
+        approval(getAccessToken(credentials["clientId"], credentials["clientSecret"], credentials["refreshToken"], url, credentials["username"], credentials["password"])["access_token"], url, sysapproval_id, data)
+    textMessage = "Please be advised that this Change Request has been {}.".format(data["state"])
+    postWebexMessage(botToken, input["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
+    return
+
+
+def updateWebexTokens(webexRefreshToken: str) -> dict:
+    """
+    Updates the Webex Tokens
+
+    :param webexRefreshToken: String representing the Webex Refresh Token.
+    :return:
+    """
+    logging.debug("UPDATING Webex Tokens")
+    responseRefreshWebexToken = refreshWebexToken(webexRefreshToken, webex_client_id, webex_secret_id)
+    webexAccessTokenExpiry = int(time.time()) + responseRefreshWebexToken["expires_in"]
+    updateAccessToken('webex_tokens', responseRefreshWebexToken["access_token"], webexAccessTokenExpiry, 1)
+    webexRefreshTokenExpiry = int(time.time()) + responseRefreshWebexToken["refresh_token_expires_in"]
+    updateAccessToken('webex_tokens', responseRefreshWebexToken["refresh_token"], webexRefreshTokenExpiry, 2)
+    return responseRefreshWebexToken
 
 
 @app.route('/api/v1/resources/webhook', methods=['POST'])
@@ -222,7 +329,7 @@ def cards():
     :return: The HTTP response to a POST method received from Webex API.
     """
     req = request.json
-    logging.debug("RECEIVED correct webexAppId: {}".format(req))
+    #logging.debug("RECEIVED correct webexAppId: {}".format(req))
     if req["appId"] != webexAppId:
         logging.error("RECEIVED incorrect webexAppId: {}".format(req["appId"]))
         return ('Incorrect appId', 401)
@@ -324,6 +431,31 @@ def cards():
         responseWorkComment = updateCommand(responseMessage, botToken, webexUrl, getRoomDetailsUrl)
         postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, "Your comment has been added to this incident.")
         return ('Card received for submitUpdateDirect', 200)
+    ### User pressed the "submit" button while working in Emergency Incident space.
+    elif responseMessage["inputs"]["flow"] == "submitUpdateEmergency":
+        responseMessage["personEmail"] = responseGetPersonDetails["emails"][0]
+        responseMessage["text"] = responseMessage["inputs"]["updateText"]
+        responseMessage["incidentNumber"] = responseMessage["inputs"]["incidentNumber"]
+        logging.debug("RECEIVED Update Incident Card submit with Incident Number: {} and update text: {}".format(
+            responseMessage["inputs"]["incidentNumber"], responseMessage["text"]))
+        if responseMessage["inputs"]["updateText"] and responseMessage["inputs"]["incidentNumber"]:
+            responseWorkComment = updateCommand(responseMessage, botToken, webexUrl, getRoomDetailsUrl)
+            if responseWorkComment.status_code == 200:
+                responseWorkComment = json.loads(responseWorkComment.text)
+                postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl,"Your comment has been added to the incident: ```" + responseWorkComment["result"]["number"] + "```.")
+        else:
+            postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, "There was no comments/notes added. Please make sure that you enter all required values.")
+        time.sleep(3)
+        emergency_card = create_emergency_incident_card(responseMessage["incidentNumber"], iconUrl,responseMessage["inputs"]["webLink"], url)
+        postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, markdownDisabledMessage, emergency_card)
+    ### User pressed the "approve/reject" button while working with Change Mangement (approval flow).
+    elif responseMessage["inputs"]["flow"] == "approval":
+        logging.debug("APPROVAL FLOW: received the message: {}".format(responseMessage))
+        approvalFlow(responseMessage)
+    ### User pressed the "approve/reject" button while working with Change Mangement (change flow).
+    elif responseMessage["inputs"]["flow"] == "approvalChangeRequest":
+        logging.debug("APPROVAL FLOW: received the message: {}".format(responseMessage))
+        approvalChangeRequestFlow(responseMessage)
     else:
         textMessage = "This is embarrassing. ServiceNow bot encountered critical error. "
         postWebexMessage(botToken, responseMessage["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
@@ -333,7 +465,7 @@ def cards():
 @app.route('/api/v1/resources/webhook/membership', methods=['POST'])
 def membership():
     """
-    Captures membership create events applied to ServiceNow bot. This represent either adding ServiceNow bot to group space or opening a 1:1 (direct) space with ServiceNow bot.
+    Captures membership create events applied to ServiceNow bot. This represents either adding ServiceNow bot to group space or opening a 1:1 (direct) space with ServiceNow bot.
     
     :return: The HTTP response to a POST method received from Webex API.
     """
@@ -360,6 +492,72 @@ def membership():
         textMessage = "Unfortunately, your account is not part of the Webex organization. Please contact your IT Service Desk to resolve this issue."
         postWebexMessage(botToken, req["data"]["roomId"], webexUrl, getMessageDetailsUrl, textMessage)
     return ('Membership received', 200)
+
+
+@app.route('/api/v1/resources/webhook/emergency', methods=['POST'])
+def emergency():
+    """
+    Captures POST request from ServiceNow to create an emergency Webex meeting and update the Incident Webex space.
+
+    :return: The HTTP response to a POST method received from ServiceNow.
+    """
+    req = request.json
+    headers = flask.request.headers
+    headers_dict = dict()
+    # Create a dictionary with HTTP headers.
+    for h in headers:
+        headers_dict[h[0]] = h[1]
+    # Checks for "X-Api-Key" key in dictionary.
+    if "X-Api-Key" not in headers_dict:
+        logging.debug("RECEIVED a request without the required X-Api-Key header.")
+        return "Unauthorized", status.HTTP_401_UNAUTHORIZED
+    elif headers_dict["X-Api-Key"] != xApiKey:
+        logging.debug("RECEIVED a request with incorrect X-Api-Key header.")
+        return "Unauthorized", status.HTTP_401_UNAUTHORIZED
+    logging.debug("RECEIVED POST message from ServiceNow to create an Emergency Webex Meeting")
+    logging.debug("POST message details: {}".format(req))
+    # Retrieve webexTokens from database
+    webexTokens = connect("webex_tokens", "name, value, expiry")
+    webexAccessToken = webexTokens["access_token"][0]
+    webexAccessTokenExpiry = int(webexTokens["access_token"][1])
+    webexRefreshToken = webexTokens["refresh_token"][0]
+    webexRefreshTokenExpiry = int(webexTokens["refresh_token"][1])
+    if webexRefreshTokenExpiry <= int(time.time()) - 60:
+        logging.debug("Webex Refresh Token will shortly expire. Expiry Epoch time: {}".format(webexRefreshTokenExpiry))
+        webexAccessToken = updateWebexTokens(webexRefreshToken)["access_token"]
+    if webexAccessTokenExpiry <= int(time.time()) - 60:
+        logging.debug("Webex Access Token will shortly expire. Expiry Epoch time: {}".format(webexAccessTokenExpiry))
+        webexAccessToken = updateWebexTokens(webexRefreshToken)["access_token"]
+    logging.debug("RECEIVED the following watchman list from ServiceNow: {}.".format(req["inviteeSysId"]))
+    if req["inviteeSysId"]:
+        if len(req["inviteeSysId"].split(',')) > 1:
+            watchman_query = 'sys_id=' + '^ORsys_id='.join(req["inviteeSysId"].split(',')) + '&sysparm_fields=email,name'
+        else:
+            watchman_query = 'sys_id=' + req["inviteeSysId"] + '&sysparm_fields=email,name'
+        response_watchman_emails = get_element_parameter(getAccessToken(credentials["clientId"], credentials["clientSecret"], credentials["refreshToken"], url, credentials["username"], credentials["password"])["access_token"], url, "sys_user", watchman_query)
+        response_watchman_emails = response_watchman_emails["result"]
+        for element in response_watchman_emails:
+            element["displayName"] = element["name"]
+            del element["name"]
+            element["coHost"] = True
+    else:
+        response_watchman_emails = []
+    meeting_attributes = {'title': '{} - {}'.format(req["incidentNumber"], req["shortDescription"]),
+                          'start': time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.localtime(time.time() + 180)),
+                          'end': time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.localtime(time.time() + (60*63))),
+                          'hostEmail': req["hostEmail"],
+                          'siteUrl': "aontest.webex.com",
+                          'invitees': response_watchman_emails}
+    logging.debug("Preparing a POST message to create a Webex Meeting with following attributes: {}".format(meeting_attributes))
+    reseponseCreateWebexMeeting = createWebexMeeting(webexAccessToken, meeting_attributes, webexUrl)
+    emergency_card = create_emergency_incident_card(req["incidentNumber"], iconUrl, reseponseCreateWebexMeeting["webLink"], url)
+    postWebexMessage(botToken, req["spaceId"], webexUrl, getMessageDetailsUrl, markdownDisabledMessage, emergency_card)
+    response = {"meetingNumber": reseponseCreateWebexMeeting["meetingNumber"],
+                "webLink": reseponseCreateWebexMeeting["webLink"],
+                "sipAddress": reseponseCreateWebexMeeting["sipAddress"]}
+    response = json.dumps(response)
+    return response, 200
+
 
 @app.route("/", methods=['Get'])
 def hello():
